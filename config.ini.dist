@@ -1,0 +1,3 @@
+esxserver = <insert vsphere server>
+username = <insert user>
+password = <insert password>
