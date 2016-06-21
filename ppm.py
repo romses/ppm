@@ -5,13 +5,10 @@ from __future__ import print_function
 from pyVim.connect import SmartConnect, Disconnect
 from pyVmomi import vim
 
-import argparse
 import atexit
-import getpass
 import ssl
 import datetime
 from datetime import timedelta,date
-import socket
 
 
 def main(o):
