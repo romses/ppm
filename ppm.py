@@ -1,4 +1,5 @@
 #!/usr/bin/python
+# -*- coding: utf-8 -*-
 
 from __future__ import print_function
 
@@ -9,6 +10,9 @@ import atexit
 import ssl
 import datetime
 from datetime import timedelta,date
+import argparse
+import socket
+from tqdm import tqdm
 
 
 def main(o):
@@ -40,14 +44,11 @@ def main(o):
     content = si.RetrieveContent()
 #prepare the report date range
     now = datetime.datetime.now()
-    report_prefix=str(now.strftime("%Y-%m"))
-
-    if (now.month-1)==0:
-        start=datetime.datetime(now.year-1,12,1,0,0)
-    else:
-        start=datetime.datetime(now.year,(now.month-1),1,0,0)
-
-    end=datetime.datetime(now.year,now.month,1,0,0)
+#    report_prefix=str(now.strftime("%Y-%m"))
+    
+    (start,end)=getperiod(o)
+    report_prefix=str(start.strftime("%Y-%m"))
+    
 
 #Gather Host,vm and datastore Data
     object_view = content.viewManager.CreateContainerView(content.rootFolder,[vim.VirtualMachine,vim.HostSystem,vim.Datastore], True)
@@ -59,8 +60,18 @@ def main(o):
     printHeader(start,end,fvm)
     printHeader(start,end,fhost)
     fdatastore.write("Datastore, Used (GB), Free (GB), Total (GB)\n")
-#collect teh data    
+#collect the data    
+
+    total=len(object_view.view)
+    akt=0
+    
+
+    if(o["verbose"]):
+        pbar=tqdm(total=len(object_view.view))
+    
     for obj in object_view.view:
+        if(o["verbose"]):
+            pbar.update()
         if isinstance(obj,vim.VirtualMachine) or isinstance(obj,vim.HostSystem):
             content = si.RetrieveContent()
             search_index = content.searchIndex
@@ -85,6 +96,8 @@ def main(o):
                                              sizeof_fmt(obj.summary.freeSpace),
                                              sizeof_fmt(obj.summary.capacity)))         
             
+    if(o["verbose"]):
+        pbar.close()
     fvm.close()
     fhost.close()
     fdatastore.close()    
@@ -138,8 +151,70 @@ def parseConfig(filename):
 
    return options
 
+def getperiod(o):
+    now = datetime.datetime.now()
+    if o["year"]==None:
+        year=now.year
+    else:
+        year=int(o["year"])
+        
+    month=None
+    if o["month"]!=None:
+        if o["month"].upper()=="JAN" or o["month"].upper()=="JANUAR" or o["month"].upper()=="JANUARY":
+            month=1
+        elif o["month"].upper()=="FEB" or o["month"].upper()=="FEBRUAR" or o["month"].upper()=="FEBRUARY":
+            month=2
+        elif o["month"].upper()=="MAR" or o["month"].upper()=="MARCH" or o["month"].upper()=="MÄRZ":
+            month=3
+        elif o["month"].upper()=="APR" or o["month"].upper()=="APRIL":
+            month=4        
+        elif o["month"].upper()=="MAY" or o["month"].upper()=="MAI":
+            month=5
+        elif o["month"].upper()=="JUN" or o["month"].upper()=="JUNI":
+            month=6
+        elif o["month"].upper()=="JUL" or o["month"].upper()=="JULI" or o["month"].upper()=="JULY":
+            month=7
+        elif o["month"].upper()=="AUG" or o["month"].upper()=="AUGUST":
+            month=8
+        elif o["month"].upper()=="SEP" or o["month"].upper()=="SEPTEMBER":
+            month=9
+        elif o["month"].upper()=="OCT" or o["month"].upper()=="OKT" or o["month"].upper()=="OCTOBER" or o["month"].upper()=="OKTOBER":
+            month=10
+        elif o["month"].upper()=="NOV" or o["month"].upper()=="NOVEMBER":
+            month=11
+        elif o["month"].upper()=="DEC" or o["month"].upper()=="DEZ" or o["month"].upper()=="DECEMBER" or o["month"].upper()=="DEZEMBER":
+            month=12
+    if month==None:
+        now = datetime.datetime.now()
+        month=now.month-1
+        
+    if(month==0):
+        month=12
+        year-=1
+        
+    start=datetime.datetime(year,month,1,0,0)
+    
+    month+=1
+    
+    if(month==13):
+        month=1
+        year+=1
+        
+    end=datetime.datetime(year,month,1,0,0)
+
+    return(start,end)
+   
 # Start program
 if __name__ == "__main__":
-   main(parseConfig('config.ini'))
+    parser = argparse.ArgumentParser()
+    parser.add_argument("-m","--month", help="report month (default current month)")
+    parser.add_argument("-y","--year", help="report year (default current year)")
+    parser.add_argument("-v","--verbose", help="show statusbar",action="store_true")
+    args = parser.parse_args()
+    c=parseConfig('config.ini')
+    c["month"]=args.month
+    c["year"]=args.year
+    c["verbose"]=args.verbose
+    main(c)
 
 
