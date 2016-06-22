@@ -207,11 +207,18 @@ def getperiod(o):
 # Start program
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
+    parser.add_argument("-c","--config", help="configfile")
     parser.add_argument("-m","--month", help="report month (default current month)")
     parser.add_argument("-y","--year", help="report year (default current year)")
     parser.add_argument("-v","--verbose", help="show statusbar",action="store_true")
     args = parser.parse_args()
-    c=parseConfig('config.ini')
+    
+    if(args.config==None):
+        config="config.ini"
+    else:
+        config=args.config
+    
+    c=parseConfig(config)
     c["month"]=args.month
     c["year"]=args.year
     c["verbose"]=args.verbose
