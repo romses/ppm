@@ -53,9 +53,9 @@ def main(o):
 #Gather Host,vm and datastore Data
     object_view = content.viewManager.CreateContainerView(content.rootFolder,[vim.VirtualMachine,vim.HostSystem,vim.Datastore], True)
 #open the report files    
-    fvm = open(report_prefix+"-vm-report.csv","w")
-    fhost = open(report_prefix+"-host-report.csv","w")
-    fdatastore = open(report_prefix+"-datastore-report.csv","w")
+    fvm = open(report_prefix+"-"+o["esxserver"]+"-vm-report.csv","w")
+    fhost = open(report_prefix+"-"+o["esxserver"]+"-host-report.csv","w")
+    fdatastore = open(report_prefix+"-"+o["esxserver"]+"-datastore-report.csv","w")
 #print the report headers in CSV    
     printHeader(start,end,fvm)
     printHeader(start,end,fhost)
