@@ -13,7 +13,10 @@ from datetime import timedelta,date
 import argparse
 import socket
 from tqdm import tqdm				# Progress bar
-from xlwt import Workbook,Style			# Excel export
+from openpyxl import Workbook			# Excel export
+from openpyxl.compat import range
+from openpyxl.cell import get_column_letter
+
 
 def main(o):
 # accept any certificate here
@@ -42,12 +45,17 @@ def main(o):
     atexit.register(Disconnect, si)
     
     content = si.RetrieveContent()
+    vchtime = si.CurrentTime()
 #prepare the report date range
     now = datetime.datetime.now()
     
-    (start,end)=getperiod(o)
+#    (start,end)=getperiod(o)
+    end = vchtime - timedelta(minutes=1)
+    start = vchtime - timedelta(minutes=(60*24*31))
+
     report_prefix=str(start.strftime("%Y-%m"))
     
+#    print(start,end)
 
 #Gather Host,vm and datastore Data
     object_view = content.viewManager.CreateContainerView(content.rootFolder,[vim.VirtualMachine,vim.HostSystem,vim.Datastore], True)
@@ -86,19 +94,19 @@ def main(o):
 #execute the query
             query = vim.PerformanceManager.QuerySpec(entity=obj,
                                                  metricId=[metricId],
-                                                 startTime=start, endTime=end)
+                                                 startTime=start, endTime=end,intervalId=7200)
 
             res=perfManager.QueryPerf(querySpec=[query])
 #save the data	  
         if isinstance(obj, vim.VirtualMachine):
             if obj.runtime.host.parent.name not in wbvm['ws']:
-                wbvm['ws'][obj.runtime.host.parent.name] = wbvm['wb'].add_sheet(obj.runtime.host.parent.name)
-                wbvm['rows'][obj.runtime.host.parent.name] = 0
+                wbvm['ws'][obj.runtime.host.parent.name] = wbvm['wb'].create_sheet(obj.runtime.host.parent.name)
+                wbvm['rows'][obj.runtime.host.parent.name] = 1
             printVM(obj,res,start,end,wbvm)
         if isinstance(obj, vim.HostSystem):
             if "ESXHOSTS" not in wbhost['ws']:
-                wbhost['ws']["ESXHOSTS"] = wbhost['wb'].add_sheet("ESXHOSTS")
-                wbhost['rows']["ESXHOSTS"] = 0
+                wbhost['ws']["ESXHOSTS"] = wbhost['wb'].create_sheet("ESXHOSTS")
+                wbhost['rows']["ESXHOSTS"] = 1
             printHost(obj,res,start,end,wbhost)
         if isinstance(obj, vim.Datastore):
             if(obj.info.vmfs.local==False):                             # Skip all local datastores
@@ -117,81 +125,75 @@ def sizeof_fmt(num):
     return "%3.1f" % (num/(1024*1024*1024.0))
     
 def printVM(obj,res,start,end,wb):
-    if wb['rows'][obj.runtime.host.parent.name]== 0:
-        wb['ws'][obj.runtime.host.parent.name].row(0).write(0,"VM")
-        i=0
-        for d in daterange(start,end):
-            i+=1
-            wb['ws'][obj.runtime.host.parent.name].row(0).write(i,str(d))
-        wb['rows'][obj.runtime.host.parent.name] +=1            
+    dates = []
+    values = []
 
-    i=0
-    if res:
-        if res[0].sampleInfo:
-            wb['ws'][obj.runtime.host.parent.name].row(wb['rows'][obj.runtime.host.parent.name]).write(0,obj.name)
-            accumulated=0
-            for d in daterange(start,end):
-                present=0
-                for j in range(0,len(res[0].sampleInfo)-1):
-                    if d==res[0].sampleInfo[j].timestamp.replace(tzinfo=None):
-                        wb['ws'][obj.runtime.host.parent.name].row(wb['rows'][obj.runtime.host.parent.name]).write(i+1,float(res[0].value[0].value[j])/100)
-                        present=1
-                i+=1
-                    
+    if res and res[0].sampleInfo:
+        if wb['rows'][obj.runtime.host.parent.name]== 1:
+            for d in daterange2(start):
+                dates.append(str(d))
+            row=["VM"]+dates+["|","accumulated"]
+            wb['ws'][obj.runtime.host.parent.name].append(row)
             wb['rows'][obj.runtime.host.parent.name] +=1
 
+        dates=[]
+        for d in range(0,len(res[0].sampleInfo)-1):
+            dates.append(res[0].sampleInfo[d].timestamp.replace(tzinfo=None))
+        
+        accumulated=0
+        i=0
+        for d in daterange2(start):
+            if d not in dates:
+                values.append(0)
+            else:
+                values.append(float(res[0].value[0].value[i])/100)
+                accumulated += float(res[0].value[0].value[i])/100
+                i+=1
+        row=[obj.name]+values+["|"]+[accumulated]
+        wb['ws'][obj.runtime.host.parent.name].append(row)
+
+    return
+
+# FIXME
 def printHost(obj,res,start,end,wb):
     if wb['rows']["ESXHOSTS"]== 0:
-        wb['ws']["ESXHOSTS"].row(0).write(0,"VM")
-        i=0
+        wb['ws']["ESXHOSTS"].cell(row=1,column=1,value="VM")
+        i=1
         for d in daterange(start,end):
             i+=1
-            wb['ws']["ESXHOSTS"].row(0).write(i,str(d))
+            wb['ws']["ESXHOSTS"].cell(row=1,column=i,value=str(d))
         wb['rows']["ESXHOSTS"] +=1            
 
-    i=0
+    i=1
     if res:
         if res[0].sampleInfo:
-            wb['ws']["ESXHOSTS"].row(wb['rows']["ESXHOSTS"]).write(0,obj.name)
+            wb['ws']["ESXHOSTS"].cell(row=wb['rows']["ESXHOSTS"],column=1,value=obj.name)
             accumulated=0
             for d in daterange(start,end):
                 present=0
                 for j in range(0,len(res[0].sampleInfo)-1):
-                    if d==res[0].sampleInfo[j].timestamp.replace(tzinfo=None):
-                        wb['ws']["ESXHOSTS"].row(wb['rows']["ESXHOSTS"]).write(i+1,float(res[0].value[0].value[j])/100)
+#                    if d==res[0].sampleInfo[j].timestamp.replace(tzinfo=None):
+                    if d==res[0].sampleInfo[j].timestamp.replace():
+                        wb['ws']["ESXHOSTS"].cell(row=wb['rows']["ESXHOSTS"],column=i+2,value=float(res[0].value[0].value[j])/100)
                         present=1
                 i+=1
                     
             wb['rows']["ESXHOSTS"] +=1
 
-#def printHost(name,res,start,end,wb):
-#    return
-#    if res:
-#        if res[0].sampleInfo:
-#            f.write(name+",")
-#            accumulated=0
-#            for d in daterange(start,end):
-#                present=1
-#
-#                for i in range(0,len(res[0].sampleInfo)-1):
-#                    if d==res[0].sampleInfo[i].timestamp.replace(tzinfo=None):
-#                        f.write(str(float(res[0].value[0].value[i])/100)+" ,")
-#                        accumulated+=float(res[0].value[0].value[i])/100
-#                        present=0
-#                if present!=0:
-#                    f.write("0,")
-#            f.write(","+str(accumulated)+"\n")
-
-def printHeader(start,end,f):
-    f.write(" ,")
-    for d in daterange(start,end):
-        f.write(str(d)+",")
-    f.write(",accumulated\n")
-
 #iterator for date ranges    
 def daterange(start_date, end_date):
-   for n in range(int ((end_date - start_date).days)):
-      yield start_date + timedelta(n)
+   for n in range((31*24*60)/20):
+      yield start_date + timedelta(minutes=2*n)
+
+def daterange2(start_date):
+   now = datetime.datetime.now()
+   start_date=datetime.datetime(now.year,now.month,now.day,0,0,0)
+   start_date=start_date-timedelta(days=31)
+
+   for n in range(0,(31*24/2)):	# every 2 hours
+      yield start_date + timedelta(minutes=n*120)
+
+
 		 
 #simple config parser         
 def parseConfig(filename):
@@ -268,8 +270,6 @@ def getperiod(o):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("-c","--config", help="configfile")
-    parser.add_argument("-m","--month", help="report month (default current month)")
-    parser.add_argument("-y","--year", help="report year (default current year)")
     parser.add_argument("-v","--verbose", help="show statusbar",action="store_true")
     args = parser.parse_args()
     
@@ -279,8 +279,8 @@ if __name__ == "__main__":
         config=args.config
     
     c=parseConfig(config)
-    c["month"]=args.month
-    c["year"]=args.year
+#    c["month"]=args.month
+#    c["year"]=args.year
     c["verbose"]=args.verbose
     main(c)
 
