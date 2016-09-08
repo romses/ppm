@@ -12,8 +12,8 @@ import datetime
 from datetime import timedelta,date
 import argparse
 import socket
-from tqdm import tqdm
-
+from tqdm import tqdm				# Progress bar
+from xlwt import Workbook,Style			# Excel export
 
 def main(o):
 # accept any certificate here
@@ -44,7 +44,6 @@ def main(o):
     content = si.RetrieveContent()
 #prepare the report date range
     now = datetime.datetime.now()
-#    report_prefix=str(now.strftime("%Y-%m"))
     
     (start,end)=getperiod(o)
     report_prefix=str(start.strftime("%Y-%m"))
@@ -52,20 +51,24 @@ def main(o):
 
 #Gather Host,vm and datastore Data
     object_view = content.viewManager.CreateContainerView(content.rootFolder,[vim.VirtualMachine,vim.HostSystem,vim.Datastore], True)
-#open the report files    
-    fvm = open(report_prefix+"-vm-report.csv","w")
-    fhost = open(report_prefix+"-host-report.csv","w")
-    fdatastore = open(report_prefix+"-datastore-report.csv","w")
-#print the report headers in CSV    
-    printHeader(start,end,fvm)
-    printHeader(start,end,fhost)
-    fdatastore.write("Datastore, Used (GB), Free (GB), Total (GB)\n")
-#collect the data    
 
+#open the report files    
+    wbvm = {}
+    wbvm['wb'] = Workbook()
+    wbvm['ws'] = {}
+    wbvm['rows'] = {}
+
+    wbhost = {}
+    wbhost['wb'] = Workbook()
+    wbhost['ws'] = {}
+    wbhost['rows'] = {}
+
+    fdatastore = open(report_prefix+"-datastore-report.csv","w")
+
+#collect the data    
     total=len(object_view.view)
     akt=0
     
-
     if(o["verbose"]):
         pbar=tqdm(total=len(object_view.view))
     
@@ -76,19 +79,27 @@ def main(o):
             content = si.RetrieveContent()
             search_index = content.searchIndex
             perfManager = content.perfManager
+
 #counterID=6 -> collect CPU/MHz        
-            metricId = vim.PerformanceManager.MetricId(counterId=6, instance="*")
+            metricId = vim.PerformanceManager.MetricId(counterId=6, instance="")
+
 #execute the query
-            query = vim.PerformanceManager.QuerySpec(maxSample=60, entity=obj,
+            query = vim.PerformanceManager.QuerySpec(entity=obj,
                                                  metricId=[metricId],
                                                  startTime=start, endTime=end)
 
             res=perfManager.QueryPerf(querySpec=[query])
 #save the data	  
         if isinstance(obj, vim.VirtualMachine):
-            printData(obj.name,res,start,end,fvm)
+            if obj.runtime.host.parent.name not in wbvm['ws']:
+                wbvm['ws'][obj.runtime.host.parent.name] = wbvm['wb'].add_sheet(obj.runtime.host.parent.name)
+                wbvm['rows'][obj.runtime.host.parent.name] = 0
+            printVM(obj,res,start,end,wbvm)
         if isinstance(obj, vim.HostSystem):
-            printData(obj.name,res,start,end,fhost)
+            if "ESXHOSTS" not in wbhost['ws']:
+                wbhost['ws']["ESXHOSTS"] = wbhost['wb'].add_sheet("ESXHOSTS")
+                wbhost['rows']["ESXHOSTS"] = 0
+            printHost(obj,res,start,end,wbhost)
         if isinstance(obj, vim.Datastore):
             if(obj.info.vmfs.local==False):                             # Skip all local datastores
                 fdatastore.write("{}, {}, {}, {}\n".format(obj.summary.name,
@@ -98,29 +109,78 @@ def main(o):
             
     if(o["verbose"]):
         pbar.close()
-    fvm.close()
-    fhost.close()
-    fdatastore.close()    
+    wbvm['wb'].save(report_prefix+"-VM.xls")
+    wbhost['wb'].save(report_prefix+"-Host.xls")
+    fdatastore.close()
     
 def sizeof_fmt(num):
     return "%3.1f" % (num/(1024*1024*1024.0))
     
-def printData(name,res,start,end,f):
+def printVM(obj,res,start,end,wb):
+    if wb['rows'][obj.runtime.host.parent.name]== 0:
+        wb['ws'][obj.runtime.host.parent.name].row(0).write(0,"VM")
+        i=0
+        for d in daterange(start,end):
+            i+=1
+            wb['ws'][obj.runtime.host.parent.name].row(0).write(i,str(d))
+        wb['rows'][obj.runtime.host.parent.name] +=1            
+
+    i=0
     if res:
         if res[0].sampleInfo:
-            f.write(name+",")
+            wb['ws'][obj.runtime.host.parent.name].row(wb['rows'][obj.runtime.host.parent.name]).write(0,obj.name)
             accumulated=0
             for d in daterange(start,end):
-                present=1
+                present=0
+                for j in range(0,len(res[0].sampleInfo)-1):
+                    if d==res[0].sampleInfo[j].timestamp.replace(tzinfo=None):
+                        wb['ws'][obj.runtime.host.parent.name].row(wb['rows'][obj.runtime.host.parent.name]).write(i+1,float(res[0].value[0].value[j])/100)
+                        present=1
+                i+=1
+                    
+            wb['rows'][obj.runtime.host.parent.name] +=1
 
-                for i in range(0,len(res[0].sampleInfo)-1):
-                    if d==res[0].sampleInfo[i].timestamp.replace(tzinfo=None):
-                        f.write(str(float(res[0].value[0].value[i])/100)+" ,")
-                        accumulated+=float(res[0].value[0].value[i])/100
-                        present=0
-                if present!=0:
-                    f.write("0,")
-            f.write(","+str(accumulated)+"\n")
+def printHost(obj,res,start,end,wb):
+    if wb['rows']["ESXHOSTS"]== 0:
+        wb['ws']["ESXHOSTS"].row(0).write(0,"VM")
+        i=0
+        for d in daterange(start,end):
+            i+=1
+            wb['ws']["ESXHOSTS"].row(0).write(i,str(d))
+        wb['rows']["ESXHOSTS"] +=1            
+
+    i=0
+    if res:
+        if res[0].sampleInfo:
+            wb['ws']["ESXHOSTS"].row(wb['rows']["ESXHOSTS"]).write(0,obj.name)
+            accumulated=0
+            for d in daterange(start,end):
+                present=0
+                for j in range(0,len(res[0].sampleInfo)-1):
+                    if d==res[0].sampleInfo[j].timestamp.replace(tzinfo=None):
+                        wb['ws']["ESXHOSTS"].row(wb['rows']["ESXHOSTS"]).write(i+1,float(res[0].value[0].value[j])/100)
+                        present=1
+                i+=1
+                    
+            wb['rows']["ESXHOSTS"] +=1
+
+#def printHost(name,res,start,end,wb):
+#    return
+#    if res:
+#        if res[0].sampleInfo:
+#            f.write(name+",")
+#            accumulated=0
+#            for d in daterange(start,end):
+#                present=1
+#
+#                for i in range(0,len(res[0].sampleInfo)-1):
+#                    if d==res[0].sampleInfo[i].timestamp.replace(tzinfo=None):
+#                        f.write(str(float(res[0].value[0].value[i])/100)+" ,")
+#                        accumulated+=float(res[0].value[0].value[i])/100
+#                        present=0
+#                if present!=0:
+#                    f.write("0,")
+#            f.write(","+str(accumulated)+"\n")
 
 def printHeader(start,end,f):
     f.write(" ,")
@@ -157,34 +217,34 @@ def getperiod(o):
         year=now.year
     else:
         year=int(o["year"])
-        
     month=None
     if o["month"]!=None:
-        if o["month"].upper()=="JAN" or o["month"].upper()=="JANUAR" or o["month"].upper()=="JANUARY":
+        o["month"]=o["month"][:3]
+        if o["month"].upper()=="JAN":
             month=1
-        elif o["month"].upper()=="FEB" or o["month"].upper()=="FEBRUAR" or o["month"].upper()=="FEBRUARY":
+        elif o["month"].upper()=="FEB":
             month=2
-        elif o["month"].upper()=="MAR" or o["month"].upper()=="MARCH" or o["month"].upper()=="MÄRZ":
+        elif o["month"].upper()=="MAR" or o["month"].upper()=="MÄR":
             month=3
-        elif o["month"].upper()=="APR" or o["month"].upper()=="APRIL":
+        elif o["month"].upper()=="APR":
             month=4        
         elif o["month"].upper()=="MAY" or o["month"].upper()=="MAI":
             month=5
-        elif o["month"].upper()=="JUN" or o["month"].upper()=="JUNI":
+        elif o["month"].upper()=="JUN":
             month=6
-        elif o["month"].upper()=="JUL" or o["month"].upper()=="JULI" or o["month"].upper()=="JULY":
+        elif o["month"].upper()=="JUL":
             month=7
-        elif o["month"].upper()=="AUG" or o["month"].upper()=="AUGUST":
+        elif o["month"].upper()=="AUG":
             month=8
-        elif o["month"].upper()=="SEP" or o["month"].upper()=="SEPTEMBER":
+        elif o["month"].upper()=="SEP":
             month=9
-        elif o["month"].upper()=="OCT" or o["month"].upper()=="OKT" or o["month"].upper()=="OCTOBER" or o["month"].upper()=="OKTOBER":
+        elif o["month"].upper()=="OCT" or o["month"].upper()=="OKT":
             month=10
-        elif o["month"].upper()=="NOV" or o["month"].upper()=="NOVEMBER":
+        elif o["month"].upper()=="NOV":
             month=11
-        elif o["month"].upper()=="DEC" or o["month"].upper()=="DEZ" or o["month"].upper()=="DECEMBER" or o["month"].upper()=="DEZEMBER":
+        elif o["month"].upper()=="DEC" or o["month"].upper()=="DEZ":
             month=12
-    if month==None:
+    else:
         now = datetime.datetime.now()
         month=now.month-1
         
@@ -223,5 +283,4 @@ if __name__ == "__main__":
     c["year"]=args.year
     c["verbose"]=args.verbose
     main(c)
-
 
