@@ -17,7 +17,6 @@ from openpyxl import Workbook			# Excel export
 from openpyxl.compat import range
 from openpyxl.cell import get_column_letter
 
-
 def main(o):
 # accept any certificate here
     context=0
@@ -43,8 +42,17 @@ def main(o):
         return -1
 
     atexit.register(Disconnect, si)
-    
+
     content = si.RetrieveContent()
+
+    perf_dict = {}
+    perfList = content.perfManager.perfCounter
+    for counter in perfList:
+        counter_full = "{}.{}.{}".format(counter.groupInfo.key, counter.nameInfo.key, counter.rollupType)
+        perf_dict[counter_full] = counter.key
+
+#    print(perf_dict)
+
     vchtime = si.CurrentTime()
 #prepare the report date range
     now = datetime.datetime.now()
@@ -89,13 +97,13 @@ def main(o):
             perfManager = content.perfManager
 
 #counterID=6 -> collect CPU/MHz        
-            metricId = vim.PerformanceManager.MetricId(counterId=6, instance="")
+#            metricId = vim.PerformanceManager.MetricId(counterId=6, instance="")
+            metricId = vim.PerformanceManager.MetricId(counterId=perf_dict['cpu.usagemhz.average'], instance="")
 
 #execute the query
             query = vim.PerformanceManager.QuerySpec(entity=obj,
                                                  metricId=[metricId],
                                                  startTime=start, endTime=end,intervalId=7200)
-
             res=perfManager.QueryPerf(querySpec=[query])
 #save the data	  
         if isinstance(obj, vim.VirtualMachine):
@@ -117,6 +125,15 @@ def main(o):
             
     if(o["verbose"]):
         pbar.close()
+
+    ws = wbvm['wb'].get_sheet_by_name('Sheet')
+    if ws is not None:
+        wbvm['wb'].remove_sheet(ws)
+
+    ws = wbhost['wb'].get_sheet_by_name('Sheet')
+    if ws is not None:
+        wbhost['wb'].remove_sheet(ws)
+
     wbvm['wb'].save(report_prefix+"-VM.xls")
     wbhost['wb'].save(report_prefix+"-Host.xls")
     fdatastore.close()
@@ -131,8 +148,8 @@ def printVM(obj,res,start,end,wb):
     if res and res[0].sampleInfo:
         if wb['rows'][obj.runtime.host.parent.name]== 1:
             for d in daterange2(start):
-                dates.append(str(d))
-            row=["VM"]+dates+["|","accumulated"]
+                dates.append(str(d.date()))
+            row=["VM"]+dates+["","accumulated"]
             wb['ws'][obj.runtime.host.parent.name].append(row)
             wb['rows'][obj.runtime.host.parent.name] +=1
 
@@ -149,36 +166,40 @@ def printVM(obj,res,start,end,wb):
                 values.append(float(res[0].value[0].value[i])/100)
                 accumulated += float(res[0].value[0].value[i])/100
                 i+=1
-        row=[obj.name]+values+["|"]+[accumulated]
+        row=[obj.name]+values+[""]+[accumulated]
         wb['ws'][obj.runtime.host.parent.name].append(row)
 
     return
 
-# FIXME
 def printHost(obj,res,start,end,wb):
-    if wb['rows']["ESXHOSTS"]== 0:
-        wb['ws']["ESXHOSTS"].cell(row=1,column=1,value="VM")
-        i=1
-        for d in daterange(start,end):
-            i+=1
-            wb['ws']["ESXHOSTS"].cell(row=1,column=i,value=str(d))
-        wb['rows']["ESXHOSTS"] +=1            
+    dates = []
+    values = []
 
-    i=1
-    if res:
-        if res[0].sampleInfo:
-            wb['ws']["ESXHOSTS"].cell(row=wb['rows']["ESXHOSTS"],column=1,value=obj.name)
-            accumulated=0
-            for d in daterange(start,end):
-                present=0
-                for j in range(0,len(res[0].sampleInfo)-1):
-#                    if d==res[0].sampleInfo[j].timestamp.replace(tzinfo=None):
-                    if d==res[0].sampleInfo[j].timestamp.replace():
-                        wb['ws']["ESXHOSTS"].cell(row=wb['rows']["ESXHOSTS"],column=i+2,value=float(res[0].value[0].value[j])/100)
-                        present=1
+    if res and res[0].sampleInfo:
+        if wb['rows']['ESXHOSTS']== 1:
+            for d in daterange2(start):
+                dates.append(str(d))
+            row=["Host"]+dates+["","accumulated"]
+            wb['ws']['ESXHOSTS'].append(row)
+            wb['rows']['ESXHOSTS'] +=1
+
+        dates=[]
+        for d in range(0,len(res[0].sampleInfo)-1):
+            dates.append(res[0].sampleInfo[d].timestamp.replace(tzinfo=None))
+        
+        accumulated=0
+        i=0
+        for d in daterange2(start):
+            if d not in dates:
+                values.append(0)
+            else:
+                values.append(float(res[0].value[0].value[i])/100)
+                accumulated += float(res[0].value[0].value[i])/100
                 i+=1
-                    
-            wb['rows']["ESXHOSTS"] +=1
+        row=[obj.name]+values+[""]+[accumulated]
+        wb['ws']['ESXHOSTS'].append(row)
+
+    return
 
 #iterator for date ranges    
 def daterange(start_date, end_date):
