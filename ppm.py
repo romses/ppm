@@ -74,6 +74,11 @@ def main(o):
     wbvm['ws'] = {}
     wbvm['rows'] = {}
 
+    wbvmram = {}
+    wbvmram['wb'] = Workbook()
+    wbvmram['ws'] = {}
+    wbvmram['rows'] = {}
+
     wbhost = {}
     wbhost['wb'] = Workbook()
     wbhost['ws'] = {}
@@ -111,6 +116,15 @@ def main(o):
                 wbvm['ws'][obj.runtime.host.parent.name] = wbvm['wb'].create_sheet(obj.runtime.host.parent.name)
                 wbvm['rows'][obj.runtime.host.parent.name] = 1
             printVM(obj,res,start,end,wbvm)
+            metricId = vim.PerformanceManager.MetricId(counterId=perf_dict['mem.usage.average'], instance="")
+            query = vim.PerformanceManager.QuerySpec(entity=obj,
+                                                 metricId=[metricId],
+                                                 startTime=start, endTime=end,intervalId=7200)
+            res=perfManager.QueryPerf(querySpec=[query])
+            if obj.runtime.host.parent.name not in wbvmram['ws']:
+                wbvmram['ws'][obj.runtime.host.parent.name] = wbvmram['wb'].create_sheet(obj.runtime.host.parent.name)
+                wbvmram['rows'][obj.runtime.host.parent.name] = 1
+            printVM(obj,res,start,end,wbvmram)
         if isinstance(obj, vim.HostSystem):
             if "ESXHOSTS" not in wbhost['ws']:
                 wbhost['ws']["ESXHOSTS"] = wbhost['wb'].create_sheet("ESXHOSTS")
@@ -130,12 +144,17 @@ def main(o):
     if ws is not None:
         wbvm['wb'].remove_sheet(ws)
 
+    ws = wbvmram['wb'].get_sheet_by_name('Sheet')
+    if ws is not None:
+        wbvmram['wb'].remove_sheet(ws)
+
     ws = wbhost['wb'].get_sheet_by_name('Sheet')
     if ws is not None:
         wbhost['wb'].remove_sheet(ws)
 
-    wbvm['wb'].save(report_prefix+"-VM.xls")
-    wbhost['wb'].save(report_prefix+"-Host.xls")
+    wbvm['wb'].save(report_prefix+"-CPU-VM.xls")
+    wbvmram['wb'].save(report_prefix+"-RAM-VM.xls")
+    wbhost['wb'].save(report_prefix+"-CPU-Host.xls")
     fdatastore.close()
     
 def sizeof_fmt(num):
