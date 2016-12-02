@@ -74,11 +74,6 @@ def main(o):
     wbvm['ws'] = {}
     wbvm['rows'] = {}
 
-    wbvmram = {}
-    wbvmram['wb'] = Workbook()
-    wbvmram['ws'] = {}
-    wbvmram['rows'] = {}
-
     wbhost = {}
     wbhost['wb'] = Workbook()
     wbhost['ws'] = {}
@@ -101,30 +96,27 @@ def main(o):
             search_index = content.searchIndex
             perfManager = content.perfManager
 
-#counterID=6 -> collect CPU/MHz        
-#            metricId = vim.PerformanceManager.MetricId(counterId=6, instance="")
             metricId = vim.PerformanceManager.MetricId(counterId=perf_dict['cpu.usagemhz.average'], instance="")
 
-#execute the query
             query = vim.PerformanceManager.QuerySpec(entity=obj,
                                                  metricId=[metricId],
                                                  startTime=start, endTime=end,intervalId=7200)
             res=perfManager.QueryPerf(querySpec=[query])
-#save the data	  
+
         if isinstance(obj, vim.VirtualMachine):
-            if obj.runtime.host.parent.name not in wbvm['ws']:
-                wbvm['ws'][obj.runtime.host.parent.name] = wbvm['wb'].create_sheet(obj.runtime.host.parent.name)
-                wbvm['rows'][obj.runtime.host.parent.name] = 1
-            printVM(obj,res,start,end,wbvm)
+            if obj.runtime.host.parent.name+" - CPU" not in wbvm['ws']:
+                wbvm['ws'][obj.runtime.host.parent.name+" - CPU"] = wbvm['wb'].create_sheet(obj.runtime.host.parent.name+" - CPU")
+                wbvm['rows'][obj.runtime.host.parent.name+" - CPU"] = 1
+            printVM(obj,res,start,end,wbvm,' - CPU')
             metricId = vim.PerformanceManager.MetricId(counterId=perf_dict['mem.usage.average'], instance="")
             query = vim.PerformanceManager.QuerySpec(entity=obj,
                                                  metricId=[metricId],
                                                  startTime=start, endTime=end,intervalId=7200)
             res=perfManager.QueryPerf(querySpec=[query])
-            if obj.runtime.host.parent.name not in wbvmram['ws']:
-                wbvmram['ws'][obj.runtime.host.parent.name] = wbvmram['wb'].create_sheet(obj.runtime.host.parent.name)
-                wbvmram['rows'][obj.runtime.host.parent.name] = 1
-            printVM(obj,res,start,end,wbvmram)
+            if obj.runtime.host.parent.name+" - RAM" not in wbvm['ws']:
+                wbvm['ws'][obj.runtime.host.parent.name+" - RAM"] = wbvm['wb'].create_sheet(obj.runtime.host.parent.name+" - RAM")
+                wbvm['rows'][obj.runtime.host.parent.name+" - RAM"] = 1
+            printVM(obj,res,start,end,wbvm," - RAM")
         if isinstance(obj, vim.HostSystem):
             if "ESXHOSTS" not in wbhost['ws']:
                 wbhost['ws']["ESXHOSTS"] = wbhost['wb'].create_sheet("ESXHOSTS")
@@ -144,33 +136,28 @@ def main(o):
     if ws is not None:
         wbvm['wb'].remove_sheet(ws)
 
-    ws = wbvmram['wb'].get_sheet_by_name('Sheet')
-    if ws is not None:
-        wbvmram['wb'].remove_sheet(ws)
-
     ws = wbhost['wb'].get_sheet_by_name('Sheet')
     if ws is not None:
         wbhost['wb'].remove_sheet(ws)
 
-    wbvm['wb'].save(report_prefix+"-CPU-VM.xls")
-    wbvmram['wb'].save(report_prefix+"-RAM-VM.xls")
+    wbvm['wb'].save(report_prefix+"-CPU-RAM-VM.xls")
     wbhost['wb'].save(report_prefix+"-CPU-Host.xls")
     fdatastore.close()
     
 def sizeof_fmt(num):
     return "%3.1f" % (num/(1024*1024*1024.0))
     
-def printVM(obj,res,start,end,wb):
+def printVM(obj,res,start,end,wb,stat):
     dates = []
     values = []
 
     if res and res[0].sampleInfo:
-        if wb['rows'][obj.runtime.host.parent.name]== 1:
-            for d in daterange2(start):
+        if wb['rows'][obj.runtime.host.parent.name+stat]== 1:
+            for d in daterange(start):
                 dates.append(str(d.date()))
             row=["VM"]+dates+["","accumulated"]
-            wb['ws'][obj.runtime.host.parent.name].append(row)
-            wb['rows'][obj.runtime.host.parent.name] +=1
+            wb['ws'][obj.runtime.host.parent.name+stat].append(row)
+            wb['rows'][obj.runtime.host.parent.name+stat] +=1
 
         dates=[]
         for d in range(0,len(res[0].sampleInfo)-1):
@@ -178,7 +165,7 @@ def printVM(obj,res,start,end,wb):
         
         accumulated=0
         i=0
-        for d in daterange2(start):
+        for d in daterange(start):
             if d not in dates:
                 values.append(0)
             else:
@@ -186,7 +173,7 @@ def printVM(obj,res,start,end,wb):
                 accumulated += float(res[0].value[0].value[i])/100
                 i+=1
         row=[obj.name]+values+[""]+[accumulated]
-        wb['ws'][obj.runtime.host.parent.name].append(row)
+        wb['ws'][obj.runtime.host.parent.name+stat].append(row)
 
     return
 
@@ -196,7 +183,7 @@ def printHost(obj,res,start,end,wb):
 
     if res and res[0].sampleInfo:
         if wb['rows']['ESXHOSTS']== 1:
-            for d in daterange2(start):
+            for d in daterange(start):
                 dates.append(str(d))
             row=["Host"]+dates+["","accumulated"]
             wb['ws']['ESXHOSTS'].append(row)
@@ -208,7 +195,7 @@ def printHost(obj,res,start,end,wb):
         
         accumulated=0
         i=0
-        for d in daterange2(start):
+        for d in daterange(start):
             if d not in dates:
                 values.append(0)
             else:
@@ -221,11 +208,7 @@ def printHost(obj,res,start,end,wb):
     return
 
 #iterator for date ranges    
-def daterange(start_date, end_date):
-   for n in range((31*24*60)/20):
-      yield start_date + timedelta(minutes=2*n)
-
-def daterange2(start_date):
+def daterange(start_date):
    now = datetime.datetime.now()
    start_date=datetime.datetime(now.year,now.month,now.day,0,0,0)
    start_date=start_date-timedelta(days=31)
